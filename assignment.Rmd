@@ -1,0 +1,71 @@
+---
+title: "Practical machine learning - Predicting how well barbell lifts are performed"
+author: "L. Gustafsson"
+date: "Sunday, 24 May, 2015"
+output: html_document
+---
+
+The purpose of this assignment is to predict how well six participants performa barbell lifts. The participants were asked to perform barbell lifts correctly and incorrectly in five different ways, and four different sets of measurements were taken on the belt, forearm, arm and dumbell using accelerometers, gyroscopes and magnetometer. For each measurement, roll, pitch and yaw was also calculated. Within each measurement window (0.5 to 2.5 seconds) a number of summary features were also calculated: mean, variance, standard deviation, max, min, amplitude, kurtosis and skewness. The outcome is recorded as either of the letters, A, B, C, D, and E.
+
+For the purpose of building a prediction model for this assignment, the summary features were removed from the data set and only the raw measurements, roll, pitch and yaw were included. Other variables such as the name of the participant, timestamps and the measurement window number were also removed, resulting in a data set with 52 features and the outcome.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, cache=TRUE}
+
+        setwd("C:/Users/linus/Dropbox/Studies/Data Science/JH - Data Science Specilisation/Practical Machine Learning/Assignment")
+        
+        library(dplyr)
+        library(caret)
+        library(ggplot2)
+
+        # Set seed for reproducibility
+        set.seed(823)
+
+        # Load training data
+        training.df <- read.csv("pml-training.csv")
+
+        # Get unique values for each variable
+        values <- apply(as.matrix(training.df), 2, unique)
+        lengthTwo <- lapply(values, function(x){(length(x)==2 && x[[2]]=="#DIV/0!")})
+        a <- sapply(lengthTwo, function(x){x[[1]][[1]]})
+
+        # Remove all variables with no values
+        training.df <- training.df %>% dplyr::select(which(!a)) 
+
+        # Get list of columns to remove
+        varColumns <- grep("^(kurtosis|skewness|max|min|var|avg|stddev|amplitude)", names(training.df))
+        training.df <- training.df %>% dplyr::select(-varColumns, -X, -user_name,-raw_timestamp_part_1, -raw_timestamp_part_2, -cvtd_timestamp, -new_window, -num_window)
+```
+
+Model building
+=======================
+
+A large number of models could be used for the purpose of predicting how well barbell lifts are performed. Here, a random forest model will be trained using the functionality in the caret package. 5-fold cross-validation is adopted for parameter tuning, which in this case is selecting the number of features randomly sampled as candidates at each split for the random forest.
+
+In addition to using five-fold cross validation for parameter tuning, 40 percent of the training set is set aside as a validation test for estimating the out-of-sample prediction accuracy from the best random forest model.
+
+```{r,  warning=FALSE, echo=FALSE, message=TRUE, cache=TRUE}
+
+        train <- createDataPartition(training.df$classe, p=0.6, list=FALSE) 
+
+        # Create a training set
+        training.set.df <- training.df[train,]
+        validation.set.df <- training.df[-train,]
+
+        # Set up values for model fitting
+        fitControl <- trainControl(method = "cv", number = 5)
+
+        rfModel <- train(classe~., data=training.set.df, method="rf", tuneLength = 5, trControl=fitControl)
+        finalRF <- rfModel$finalModel
+```
+
+The parameter tuning in the caret package identifies `r finalRF$tuneValue[[1]]` as the best value for the number of features to consider at each split. As can be seen in the chart below, prediction accuracy worsens 
+
+```{r, echo=FALSE, fig.height=4, message=FALSE, warning=FALSE}
+
+        library(ggplot2)
+        ggplot(rfModel)
+```
+
+The best random forest model (mtry=`r finalRF$tuneValue[[1]]`) has an in-sample error rate of `r round(1-rfModel$results[which(rfModel$results[,2]==max(rfModel$results[,2])),2],5)`. We except the out-of-sample error rate to be larger than the in-sample error rate.
+
+In order to estimate the out-of-sample error rate, predictions are made with the best random forest model on the previously set aside validation test (40 per cent of data set), and the error rates is calculated. The best random forest model has an error rate of `r round(1-mean(validation.set.df$classe==predict(finalRF,validation.set.df)),5)` on the validation set, slightly lower than the in-sample error rate discussed above. While somewhat unexpected, this is not implausible given that the training and validation sets are probably very similar, with observations drawn from only six different individuals.
